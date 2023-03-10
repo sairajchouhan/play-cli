@@ -2,7 +2,7 @@ use std::{
     env,
     error::Error,
     fs::{self, read_dir},
-    io,
+    io, panic,
     path::{Path, PathBuf},
     str::Lines,
     thread::panicking,
@@ -56,12 +56,61 @@ fn main() -> Result<(), Box<dyn Error>> {
         None => panic!("Second argument cannot be empty"),
     };
 
+    let target_location = Path::new("./final");
+
     match action {
         Action::New => {
             if template == Templates::TsNode.to_str() {
                 let path = Templates::TsNode.get_local_template_dir();
                 let git_ignore_str = git_ignore(path);
-                get_all_in_dir(path, Some(&git_ignore_str));
+                let all_paths_to_read = get_all_in_dir(path, Some(&git_ignore_str));
+
+                if target_location.is_dir() {
+                    let parent_path = target_location.join(Templates::TsNode.to_str());
+                    println!("{:?}", parent_path);
+                    if !parent_path.is_dir() {
+                        fs::create_dir(&parent_path).unwrap();
+                    }
+                    if parent_path.is_file() {
+                        todo!();
+                    }
+                } else {
+                    panic!("Target location is not a directory");
+                }
+
+                all_paths_to_read.iter().for_each(|x| {
+                    let content = fs::read_to_string(x);
+                    let content = match content {
+                        Ok(stuff) => stuff,
+                        Err(_e) => panic!("could not read file"),
+                    };
+
+                    let path = match x.to_str() {
+                        Some(path) => String::from(path),
+                        None => panic!("just panic"),
+                    };
+                    let path = path.replace("./templates", "./final");
+                    let final_path = Path::new(&path);
+                    let file = fs::File::create(final_path);
+
+                    match file {
+                        Ok(_) => (),
+                        Err(e) => {
+                            eprintln!("{:?}", e);
+                            panic!("File creation falied")
+                        }
+                    }
+
+                    let write_res = fs::write(final_path, content);
+
+                    match write_res {
+                        Ok(_) => (),
+                        Err(err) => {
+                            println!("{}", err);
+                            panic!("Could not write file")
+                        }
+                    }
+                });
             }
         }
         Action::Ls => {}
