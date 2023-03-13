@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let path = template_enum.get_local_template_dir();
                 let git_ignore_str = read_gitignore(path);
                 let all_paths_to_read = get_all_in_dir(path, Some(git_ignore_str));
-                let parent_path = target_location.join(Templates::TsNode.to_str());
+                let parent_path = target_location.join(template_enum.to_str());
 
                 if !target_location.exists() {
                     fs::create_dir(&target_location).unwrap();
@@ -93,8 +93,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 all_paths_to_read.iter().for_each(|x| {
                     let mut path = x.to_str().unwrap().split("/").skip(3).collect::<Vec<_>>();
                     path.pop();
-                    let mut final_path =
-                        Path::new(target_location).join(Templates::TsNode.to_str());
+                    let mut final_path = Path::new(target_location).join(template_enum.to_str());
 
                     for each_thing in path {
                         let temp_dir = final_path.join(each_thing);
@@ -124,15 +123,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn read_gitignore(path: &Path) -> String {
-    let file_result = fs::read_to_string(path.join(".gitignore"));
-    let file = match file_result {
-        Ok(file) => file,
-        Err(_e) => {
-            println!("No .gitignore file found");
-            "".to_string()
-        }
-    };
-
+    let file = fs::read_to_string(path.join(".gitignore")).unwrap_or("".to_string());
     file.trim().to_string()
 }
 
