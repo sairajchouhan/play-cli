@@ -1,11 +1,10 @@
 use std::{
     env,
     error::Error,
-    fs::{self, read_dir},
-    io, panic,
+    fs,
+    panic,
     path::{Path, PathBuf},
-    str::Lines,
-    thread::panicking,
+    str::FromStr,
 };
 
 enum Action {
@@ -30,6 +29,17 @@ impl Templates {
         match self {
             self::Templates::TsNode => "ts-node",
             self::Templates::TsExpress => "ts-express",
+        }
+    }
+}
+
+impl FromStr for Templates {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ts-node" => Ok(Templates::TsNode),
+            "ts-express" => Ok(Templates::TsExpress),
+            _ => Err(()),
         }
     }
 }
@@ -59,23 +69,25 @@ fn main() -> Result<(), Box<dyn Error>> {
     let target_location = Path::new("./final");
 
     match action {
-        Action::New => {
-            if template == Templates::TsNode.to_str() {
-                let path = Templates::TsNode.get_local_template_dir();
-                let git_ignore_str = git_ignore(path);
+        Action::New => match Templates::from_str(&template) {
+            Ok(template_enum) => {
+                let path = template_enum.get_local_template_dir();
+                let git_ignore_str = read_gitignore(path);
                 let all_paths_to_read = get_all_in_dir(path, Some(&git_ignore_str));
+                let parent_path = target_location.join(Templates::TsNode.to_str());
+
+                if !target_location.exists() {
+                    fs::create_dir(&target_location).unwrap();
+                }
 
                 if target_location.is_dir() {
-                    let parent_path = target_location.join(Templates::TsNode.to_str());
-                    println!("{:?}", parent_path);
-                    if !parent_path.is_dir() {
+                    if !parent_path.exists() || !parent_path.is_dir() {
                         fs::create_dir(&parent_path).unwrap();
                     }
+
                     if parent_path.is_file() {
-                        todo!();
+                        panic!("The thing is already file");
                     }
-                } else {
-                    panic!("Target location is not a directory");
                 }
 
                 all_paths_to_read.iter().for_each(|x| {
@@ -112,18 +124,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                 });
             }
-        }
+            Err(_e) => {
+                eprintln!("Invliad template")
+            }
+        },
         Action::Ls => {}
     };
 
     Ok(())
 }
 
-fn git_ignore(path: &Path) -> String {
+fn read_gitignore(path: &Path) -> String {
     let file_result = fs::read_to_string(path.join(".gitignore"));
     let file = match file_result {
         Ok(file) => file,
-        Err(_e) => panic!("cannot read to string .gitignore"),
+        Err(_e) => {
+            println!("No .gitignore file found");
+            "".to_string()
+        }
     };
 
     file.trim().to_string()
