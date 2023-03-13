@@ -1,7 +1,7 @@
 use std::{
     env,
     error::Error,
-    fs,
+    fs::{self, DirEntry},
     panic,
     path::{Path, PathBuf},
     str::FromStr,
@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(template_enum) => {
                 let path = template_enum.get_local_template_dir();
                 let git_ignore_str = read_gitignore(path);
-                let all_paths_to_read = get_all_in_dir(path, Some(&git_ignore_str));
+                let all_paths_to_read = get_all_in_dir(path, Some(git_ignore_str));
                 let parent_path = target_location.join(Templates::TsNode.to_str());
 
                 if !target_location.exists() {
@@ -91,37 +91,26 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 all_paths_to_read.iter().for_each(|x| {
-                    let content = fs::read_to_string(x);
-                    let content = match content {
-                        Ok(stuff) => stuff,
-                        Err(_e) => panic!("could not read file"),
-                    };
+                    let mut path = x.to_str().unwrap().split("/").skip(3).collect::<Vec<_>>();
+                    path.pop();
+                    let mut final_path =
+                        Path::new(target_location).join(Templates::TsNode.to_str());
 
-                    let path = match x.to_str() {
-                        Some(path) => String::from(path),
-                        None => panic!("just panic"),
-                    };
+                    for each_thing in path {
+                        let temp_dir = final_path.join(each_thing);
+                        if !temp_dir.exists() {
+                            fs::create_dir(temp_dir).unwrap();
+                            final_path.push(each_thing);
+                        }
+                    }
+
+                    let path = x.to_str().unwrap();
                     let path = path.replace("./templates", "./final");
                     let final_path = Path::new(&path);
-                    let file = fs::File::create(final_path);
 
-                    match file {
-                        Ok(_) => (),
-                        Err(e) => {
-                            eprintln!("{:?}", e);
-                            panic!("File creation falied")
-                        }
-                    }
-
-                    let write_res = fs::write(final_path, content);
-
-                    match write_res {
-                        Ok(_) => (),
-                        Err(err) => {
-                            println!("{}", err);
-                            panic!("Could not write file")
-                        }
-                    }
+                    let content = fs::read_to_string(x).unwrap();
+                    fs::File::create(final_path).expect("file creation failed");
+                    fs::write(final_path, content).expect("file write failed");
                 });
             }
             Err(_e) => {
@@ -147,49 +136,27 @@ fn read_gitignore(path: &Path) -> String {
     file.trim().to_string()
 }
 
-fn get_all_in_dir(path: &Path, ignore: Option<&String>) -> Vec<PathBuf> {
-    let read_dir = fs::read_dir(path);
+fn get_all_in_dir(path: &Path, ignore: Option<String>) -> Vec<PathBuf> {
+    let dir_contents = fs::read_dir(path).unwrap();
     let mut result: Vec<PathBuf> = vec![];
+    let git_ignore = ignore.unwrap_or(String::from(""));
 
-    if let Ok(dir_contents) = read_dir {
-        for item in dir_contents {
-            if let Ok(dir_entry) = item {
-                let file_name_res = dir_entry.file_name().into_string();
+    for item in dir_contents {
+        let dir_entry = item.unwrap();
+        let file_name = dir_entry.file_name().into_string().unwrap();
 
-                let file_name = match file_name_res {
-                    Ok(file_name) => file_name,
-                    Err(e) => {
-                        eprintln!("{:?}", e);
-                        panic!("OS string into string gone wrong")
-                    }
-                };
-
-                if let Some(git_ignore) = ignore {
-                    if git_ignore.contains(&file_name) {
-                        continue;
-                    }
-                }
-
-                let result_meta = dir_entry.metadata();
-                match result_meta {
-                    Ok(meta) => {
-                        if meta.is_dir() {
-                            get_all_in_dir(&dir_entry.path(), None);
-                        } else {
-                            result.push(dir_entry.path());
-                        }
-                    }
-                    Err(_e) => {
-                        panic!("meta for result not found")
-                    }
-                }
-                println!("{:?}", dir_entry)
-            } else {
-                panic!("else not a valid direntry")
-            }
+        if git_ignore.contains(&file_name) {
+            continue;
         }
-    } else {
-        panic!("else block: read_dir got mad")
+
+        let meta = dir_entry.metadata().unwrap();
+
+        if meta.is_dir() {
+            let more_results = get_all_in_dir(&path.join(&file_name), None);
+            result.extend(more_results);
+        } else {
+            result.push(dir_entry.path());
+        }
     }
 
     result

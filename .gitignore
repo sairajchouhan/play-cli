@@ -1,3 +1,4 @@
 /target
 final
 node_modules
+.vscode
