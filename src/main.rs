@@ -1,8 +1,7 @@
 use std::{
     env,
     error::Error,
-    fs,
-    panic,
+    fs, panic,
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -66,11 +65,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         None => panic!("Second argument cannot be empty"),
     };
 
-    let target_location = Path::new("./final");
-
     match action {
         Action::New => match Templates::from_str(&template) {
             Ok(template_enum) => {
+                let target_string = env::args().nth(3).unwrap_or("/Users/sairaj/mine".to_string());
+                let target_location = Path::new(&target_string);
                 let path = template_enum.get_local_template_dir();
                 let git_ignore_str = read_gitignore(path);
                 let all_paths_to_read = get_all_in_dir(path, Some(git_ignore_str));
@@ -104,13 +103,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
 
                     let path = x.to_str().unwrap();
-                    let path = path.replace("./templates", "./final");
+                    let path = path.replace("./templates", target_location.to_str().unwrap());
                     let final_path = Path::new(&path);
+
 
                     let content = fs::read_to_string(x).unwrap();
                     fs::File::create(final_path).expect("file creation failed");
                     fs::write(final_path, content).expect("file write failed");
                 });
+                println!("Done writing")
             }
             Err(_e) => {
                 eprintln!("Invliad template")
