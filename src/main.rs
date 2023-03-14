@@ -1,7 +1,7 @@
 use std::{
     env,
     error::Error,
-    fs::{self, DirEntry},
+    fs,
     panic,
     path::{Path, PathBuf},
     str::FromStr,
