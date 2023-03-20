@@ -46,6 +46,7 @@ impl FromStr for Templates {
 fn main() -> Result<(), Box<dyn Error>> {
     let action = env::args().nth(1);
     let template = env::args().nth(2);
+    let target_dir = dirs::home_dir().expect("Error while getting home dir");
 
     let action = match action {
         Some(item) => {
@@ -68,7 +69,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     match action {
         Action::New => match Templates::from_str(&template) {
             Ok(template_enum) => {
-                let target_string = env::args().nth(3).unwrap_or("/Users/sairaj/mine".to_string());
+                let target_string = env::args()
+                    .nth(3)
+                    .unwrap_or(target_dir.to_str().unwrap().to_string());
                 let target_location = Path::new(&target_string);
                 let path = template_enum.get_local_template_dir();
                 let git_ignore_str = read_gitignore(path);
@@ -105,7 +108,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let path = x.to_str().unwrap();
                     let path = path.replace("./templates", target_location.to_str().unwrap());
                     let final_path = Path::new(&path);
-
 
                     let content = fs::read_to_string(x).unwrap();
                     fs::File::create(final_path).expect("file creation failed");
