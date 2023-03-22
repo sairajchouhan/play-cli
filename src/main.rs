@@ -77,23 +77,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .nth(3)
                 .unwrap_or(target_dir.to_str().unwrap().to_string());
             let target_location = Path::new(&target_string);
-            let path = template.get_local_template_dir();
-            let git_ignore_str = read_gitignore(path);
-            let all_paths_to_read = get_all_in_dir(path, Some(git_ignore_str));
+            let template_dir_path = template.get_local_template_dir();
+            let git_ignore_str = read_gitignore(template_dir_path);
+            let all_paths_to_read = get_all_in_dir(template_dir_path, Some(git_ignore_str));
             let parent_path = target_location.join(template.to_str());
 
-            if !target_location.exists() {
-                fs::create_dir(&target_location).unwrap();
+            if !parent_path.exists() || !parent_path.is_dir() {
+                fs::create_dir(&parent_path).unwrap();
             }
 
-            if target_location.is_dir() {
-                if !parent_path.exists() || !parent_path.is_dir() {
-                    fs::create_dir(&parent_path).unwrap();
-                }
-
-                if parent_path.is_file() {
-                    panic!("The thing is already file");
-                }
+            if parent_path.is_file() {
+                panic!("The thing is already file");
             }
 
             all_paths_to_read.iter().for_each(|x| {
@@ -120,7 +114,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("Done writing")
         }
         Actions::Ls { template } => {
-            println!("Ls command for {template:?}")
+            println!("Ls command for {template:?}");
         }
     }
 
