@@ -61,12 +61,12 @@ enum Actions {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let target_dir = dirs::home_dir()
+    let home_dir = dirs::home_dir()
         .expect("Error while getting home dir")
         .join("playground");
 
-    if !target_dir.exists() {
-        fs::create_dir(&target_dir).expect("Error in creating the target dir")
+    if !home_dir.exists() {
+        fs::create_dir(&home_dir).expect("Error in creating the target dir")
     }
 
     let cli = Cli::parse();
@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Actions::New { template } => {
             let target_string = env::args()
                 .nth(3)
-                .unwrap_or(target_dir.to_str().unwrap().to_string());
+                .unwrap_or(home_dir.to_str().unwrap().to_string());
             let target_location = Path::new(&target_string);
             let template_dir_path = template.get_local_template_dir();
             let git_ignore_str = read_gitignore(template_dir_path);
