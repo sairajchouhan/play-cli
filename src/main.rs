@@ -1,14 +1,14 @@
-use std::{
-    collections::HashMap,
-    error::Error,
-    path::{Path, PathBuf},
-    str::FromStr,
+use {
+    clap::{Parser, Subcommand, ValueEnum},
+    rand::random,
+    std::{
+        collections::HashMap,
+        error::Error,
+        fs,
+        path::{Path, PathBuf},
+        str::FromStr,
+    },
 };
-use std::fs;
-
-use rand::random;
-
-use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(ValueEnum, Clone, Debug)]
 enum Templates {
@@ -88,13 +88,21 @@ fn main() -> Result<(), Box<dyn Error>> {
                 inner
             } else {
                 let mut random_name = template.to_str().to_string();
-                random_name.push_str("_"); 
+                random_name.push_str("_");
                 random_name.push_str(&random::<u32>().to_string());
                 random_name
             };
 
-            if !target_template_dir_path.join(&project_dir_name).exists() {
-                fs::create_dir(&target_template_dir_path.join(&project_dir_name))
+            let project_path = target_template_dir_path.join(&project_dir_name);
+
+            if project_path.exists() {
+                panic!(
+                    "Project with name {} already exists in {}",
+                    project_dir_name,
+                    template.to_str()
+                )
+            } else {
+                fs::create_dir(&project_path)
                     .expect("failed to create a random folder in target template dir");
             }
 
@@ -136,7 +144,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 fs::write(&path, contents).unwrap();
             });
 
-            println!("Project created")
+            println!("Project created");
         }
         Actions::Ls { template } => {
             println!("Ls command for {template:?}");
