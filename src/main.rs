@@ -1,9 +1,10 @@
 use std::{
+    collections::HashMap,
     error::Error,
-    fs, panic,
     path::{Path, PathBuf},
-    str::FromStr, collections::HashMap,
+    str::FromStr,
 };
+use std::fs;
 
 use rand::random;
 
@@ -55,6 +56,9 @@ enum Actions {
     New {
         #[arg(value_enum)]
         template: Templates,
+
+        #[arg(short, long)]
+        name: Option<String>,
     },
     Ls {
         template: Option<Templates>,
@@ -73,26 +77,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     match cli.actions {
-        Actions::New { template } => {
+        Actions::New { template, name } => {
             let target_template_dir_path = target_path.join(template.to_str());
 
             if !target_template_dir_path.exists() || !target_template_dir_path.is_dir() {
                 fs::create_dir(&target_template_dir_path).unwrap();
             }
 
-            let mut random_folder = template.to_str().to_string();
-            random_folder.push_str(&random::<u32>().to_string());
+            let project_dir_name = if let Some(inner) = name {
+                inner
+            } else {
+                let mut random_name = template.to_str().to_string();
+                random_name.push_str("_"); 
+                random_name.push_str(&random::<u32>().to_string());
+                random_name
+            };
 
-            if !target_template_dir_path.join(&random_folder).exists() {
-                fs::create_dir(&target_template_dir_path.join(&random_folder))
+            if !target_template_dir_path.join(&project_dir_name).exists() {
+                fs::create_dir(&target_template_dir_path.join(&project_dir_name))
                     .expect("failed to create a random folder in target template dir");
             }
 
             let local = template.get_local_template_dir();
             let all_paths_to_read = get_all_in_dir(&local);
             let all_paths_to_read = all_paths_to_read.iter().map(|x| x).collect::<Vec<_>>();
-
-
 
             let new_all_paths = all_paths_to_read
                 .iter()
@@ -102,11 +110,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .to_path_buf();
                     path.strip_prefix(stripe).unwrap().to_path_buf()
                 })
-                .map(|striped| target_template_dir_path.join(&random_folder).join(striped))
+                .map(|striped| {
+                    target_template_dir_path
+                        .join(&project_dir_name)
+                        .join(striped)
+                })
                 .collect::<Vec<_>>();
 
             let mut map: HashMap<&PathBuf, &PathBuf> = HashMap::new();
-            
+
             for (key, value) in new_all_paths.iter().zip(all_paths_to_read) {
                 map.insert(key, value);
             }
@@ -133,7 +145,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
-
 
 fn read_gitignore(path: &PathBuf) -> String {
     let file = fs::read_to_string(path.join(".gitignore")).unwrap_or("".to_string());
