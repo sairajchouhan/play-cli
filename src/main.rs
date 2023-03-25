@@ -11,7 +11,7 @@ enum Templates {
 }
 
 impl Templates {
-    fn get_templates_dir(&self) -> PathBuf {
+    fn get_template_dir(&self) -> PathBuf {
         let templates_dir = dirs::home_dir()
             .unwrap()
             .join("mine")
@@ -91,7 +91,7 @@ fn main() -> anyhow::Result<()> {
             }
             let project_dir = name.unwrap_or(memorable_wordlist::snake_case(32));
             let project_dir_path = target_dir_path.join(template.to_str()).join(project_dir);
-            copy_dir_recursive(&template.get_templates_dir(), &project_dir_path).unwrap();
+            copy_dir_recursive(&template.get_template_dir(), &project_dir_path).unwrap();
         }
         Actions::Ls { template } => {
             println!("Ls command for {template:?}");
