@@ -1,13 +1,6 @@
 use {
     clap::{Parser, Subcommand, ValueEnum},
-    rand::random,
-    std::{
-        collections::HashMap,
-        error::Error,
-        fs,
-        path::{Path, PathBuf},
-        str::FromStr,
-    },
+    std::{error::Error, fs, io, path::PathBuf, str::FromStr},
 };
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -17,10 +10,17 @@ enum Templates {
 }
 
 impl Templates {
-    fn get_local_template_dir(&self) -> PathBuf {
+    fn get_templates_dir(&self) -> PathBuf {
+        let templates_dir = dirs::home_dir()
+            .unwrap()
+            .join("mine")
+            .join("play-cli")
+            .join("templates")
+            .join(self.to_str());
+
         match self {
-            self::Templates::TsNode => Path::new("./templates/ts-node").to_path_buf(),
-            self::Templates::TsExpress => Path::new("./templates/ts-express").to_path_buf(),
+            self::Templates::TsNode => templates_dir,
+            self::Templates::TsExpress => templates_dir,
         }
     }
 
@@ -78,73 +78,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match cli.actions {
         Actions::New { template, name } => {
-            let target_template_dir_path = target_path.join(template.to_str());
-
-            if !target_template_dir_path.exists() || !target_template_dir_path.is_dir() {
-                fs::create_dir(&target_template_dir_path).unwrap();
+            let has_template_root_dir = target_path.join(template.to_str()).exists();
+            if !has_template_root_dir {
+                fs::create_dir(target_path.join(template.to_str())).unwrap();
             }
-
-            let project_dir_name = if let Some(inner) = name {
-                inner
-            } else {
-                let mut random_name = template.to_str().to_string();
-                random_name.push_str("_");
-                random_name.push_str(&random::<u32>().to_string());
-                random_name
-            };
-
-            let project_path = target_template_dir_path.join(&project_dir_name);
-
-            if project_path.exists() {
-                panic!(
-                    "Project with name {} already exists in {}",
-                    project_dir_name,
-                    template.to_str()
-                )
-            } else {
-                fs::create_dir(&project_path)
-                    .expect("failed to create a random folder in target template dir");
-            }
-
-            let local = template.get_local_template_dir();
-            let all_paths_to_read = get_all_in_dir(&local);
-            let all_paths_to_read = all_paths_to_read.iter().map(|x| x).collect::<Vec<_>>();
-
-            let new_all_paths = all_paths_to_read
-                .iter()
-                .map(|path| {
-                    let stripe = Path::new("./templates")
-                        .join(template.to_str())
-                        .to_path_buf();
-                    path.strip_prefix(stripe).unwrap().to_path_buf()
-                })
-                .map(|striped| {
-                    target_template_dir_path
-                        .join(&project_dir_name)
-                        .join(striped)
-                })
-                .collect::<Vec<_>>();
-
-            let mut map: HashMap<&PathBuf, &PathBuf> = HashMap::new();
-
-            for (key, value) in new_all_paths.iter().zip(all_paths_to_read) {
-                map.insert(key, value);
-            }
-
-            new_all_paths.iter().for_each(|path| {
-                if !path.parent().unwrap().exists() {
-                    fs::create_dir_all(path.parent().unwrap()).unwrap();
-                }
-
-                fs::File::create(&path).unwrap();
-
-                let original_path = map.get(path).unwrap();
-                let contents = fs::read_to_string(original_path).unwrap();
-
-                fs::write(&path, contents).unwrap();
-            });
-
-            println!("Project created");
+            let project_dir = name.unwrap_or(memorable_wordlist::snake_case(32));
+            let project_dir_path = target_path.join(template.to_str()).join(project_dir);
+            copy_dir_recursive(&template.get_templates_dir(), &project_dir_path).unwrap();
         }
         Actions::Ls { template } => {
             println!("Ls command for {template:?}");
@@ -154,34 +94,27 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn read_gitignore(path: &PathBuf) -> String {
-    let file = fs::read_to_string(path.join(".gitignore")).unwrap_or("".to_string());
-    file.trim().to_string()
-}
-
-fn get_all_in_dir(path: &PathBuf) -> Vec<PathBuf> {
-    let dir_contents = fs::read_dir(path).unwrap();
-    let mut result: Vec<PathBuf> = vec![];
-
-    let git_ignore = read_gitignore(&path);
-
-    for item in dir_contents {
-        let dir_entry = item.unwrap();
-        let file_name = dir_entry.file_name().into_string().unwrap();
-
-        if git_ignore.contains(&file_name) {
-            continue;
-        }
-
-        let meta = dir_entry.metadata().unwrap();
-
-        if meta.is_dir() {
-            let more_results = get_all_in_dir(&path.join(&file_name));
-            result.extend(more_results);
-        } else {
-            result.push(dir_entry.path());
-        }
+fn copy_dir_recursive(src_dir: &PathBuf, target_dir: &PathBuf) -> io::Result<()> {
+    if !src_dir.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Source directory does not exist",
+        ));
     }
 
-    result
+    if !target_dir.exists() {
+        fs::create_dir_all(target_dir)?;
+    }
+
+    for entry in fs::read_dir(src_dir)? {
+        let entry = entry?;
+        let entry_type = entry.file_type()?;
+        let target_path = target_dir.join(entry.file_name());
+        if entry_type.is_dir() {
+            copy_dir_recursive(&entry.path(), &target_path)?;
+        } else {
+            fs::copy(&entry.path(), &target_path)?;
+        }
+    }
+    Ok(())
 }

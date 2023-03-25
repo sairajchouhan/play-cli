@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.1.11", features = ["derive"] }
 dirs = "5.0.0"
-rand = "0.8.5"
+memorable-wordlist = "0.1.7"
