@@ -1,7 +1,7 @@
 use {
     clap::{Parser, Subcommand, ValueEnum},
     serde::{Deserialize, Serialize},
-    std::{fs, io, path::PathBuf, str::FromStr},
+    std::{fs, io, path::PathBuf, process::Command, str::FromStr},
 };
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -64,8 +64,10 @@ enum Actions {
     Ls {
         template: Option<Templates>,
     },
-    /// displays config file contents
-    Config,
+    Config {
+        #[arg(short, long)]
+        open: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -94,14 +96,24 @@ fn main() -> anyhow::Result<()> {
         Actions::Ls { template } => {
             println!("Ls command for {template:?}");
         }
-        Actions::Config => {
-            let config = fs::read_to_string(get_config_dir_path());
-            match config {
-                Ok(value) => {
-                    println!("{}", value)
-                }
-                Err(e) => {
-                    eprintln!("{e:?}");
+        Actions::Config { open } => {
+            if open {
+                let editor = std::env::var("EDITOR").unwrap();
+                let file_path = get_config_dir_path();
+
+                Command::new(editor)
+                    .arg(&file_path)
+                    .status()
+                    .expect("Something went wrong");
+            } else {
+                let config = fs::read_to_string(get_config_dir_path());
+                match config {
+                    Ok(value) => {
+                        println!("{}", value)
+                    }
+                    Err(e) => {
+                        eprintln!("{e:?}");
+                    }
                 }
             }
         }
@@ -165,6 +177,7 @@ fn init_config() -> anyhow::Result<()> {
 #[derive(Serialize, Deserialize)]
 struct Config {
     target_dir: PathBuf,
+    // templates_dir: PathBuf,
 }
 
 fn get_config() -> Config {
