@@ -1,7 +1,7 @@
 use {
     clap::{Parser, Subcommand, ValueEnum},
     serde::{Deserialize, Serialize},
-    std::{collections::HashMap, error::Error, fs, io, path::PathBuf, str::FromStr},
+    std::{fs, io, path::PathBuf, str::FromStr},
 };
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -64,6 +64,8 @@ enum Actions {
     Ls {
         template: Option<Templates>,
     },
+    /// displays config file contents
+    Config,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -74,7 +76,6 @@ fn main() -> anyhow::Result<()> {
     let config = get_config();
 
     let target_dir_path = config.target_dir;
-
 
     if !target_dir_path.exists() {
         fs::create_dir(&target_dir_path).expect("target dir creation failed")
@@ -92,6 +93,17 @@ fn main() -> anyhow::Result<()> {
         }
         Actions::Ls { template } => {
             println!("Ls command for {template:?}");
+        }
+        Actions::Config => {
+            let config = fs::read_to_string(get_config_dir_path());
+            match config {
+                Ok(value) => {
+                    println!("{}", value)
+                }
+                Err(e) => {
+                    eprintln!("{e:?}");
+                }
+            }
         }
     }
 
@@ -158,6 +170,6 @@ struct Config {
 fn get_config() -> Config {
     let config_dir_path = get_config_dir_path();
     let config_string = fs::read_to_string(config_dir_path).unwrap();
-    serde_json::from_str::<Config>(config_string.as_str()).expect("parsing json from string to Config failed")
+    serde_json::from_str::<Config>(config_string.as_str())
+        .expect("parsing json from string to Config failed")
 }
-
