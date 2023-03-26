@@ -1,1 +1,1 @@
-console.log("Ts Node Bro")
+console.log("Ts Node")
