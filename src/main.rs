@@ -1,7 +1,8 @@
 use {
     clap::{Parser, Subcommand, ValueEnum},
+    ignore::WalkBuilder,
     serde::{Deserialize, Serialize},
-    std::{fs, io, path::PathBuf, process::Command, str::FromStr},
+    std::{fs, path::Path, path::PathBuf, process::Command, str::FromStr},
 };
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -19,10 +20,7 @@ impl Templates {
             .join("templates")
             .join(self.to_str());
 
-        match self {
-            self::Templates::TsNode => templates_dir,
-            self::Templates::TsExpress => templates_dir,
-        }
+        templates_dir
     }
 
     fn to_str(&self) -> &'static str {
@@ -122,28 +120,35 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn copy_dir_recursive(src_dir: &PathBuf, target_dir: &PathBuf) -> io::Result<()> {
-    if !src_dir.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Source directory does not exist",
-        ));
-    }
+fn copy_dir_recursive(src_dir: &PathBuf, dest_dir: &PathBuf) -> anyhow::Result<()> {
+    let read_path = Path::new(src_dir);
+    let walk_dir = WalkBuilder::new(read_path).hidden(false).build();
+    let target_dir = Path::new(dest_dir);
 
-    if !target_dir.exists() {
-        fs::create_dir_all(target_dir)?;
-    }
+    for item in walk_dir {
+        let item = item?;
+        let relative = item.path().strip_prefix(read_path);
+        let relative = relative?;
+        let item_type = item.file_type().unwrap();
 
-    for entry in fs::read_dir(src_dir)? {
-        let entry = entry?;
-        let entry_type = entry.file_type()?;
-        let target_path = target_dir.join(entry.file_name());
-        if entry_type.is_dir() {
-            copy_dir_recursive(&entry.path(), &target_path)?;
-        } else {
-            fs::copy(&entry.path(), &target_path)?;
+        if item_type.is_dir() {
+            fs::create_dir_all(target_dir.join(relative)).expect("Unable to create the dir");
+        }
+
+        // continue;
+        if item_type.is_file() {
+            let dest_path = target_dir.join(relative);
+            let dest_parent = dest_path.parent().unwrap();
+
+            if !dest_path.exists() {
+                fs::create_dir_all(&dest_parent).unwrap()
+            }
+
+            fs::File::create(&dest_path).unwrap();
+            fs::copy(item.path(), dest_path).unwrap();
         }
     }
+
     Ok(())
 }
 
