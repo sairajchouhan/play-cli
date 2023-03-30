@@ -23,7 +23,8 @@ enum Actions {
         name: Option<String>,
     },
     Ls {
-        template: Option<String>,
+        #[arg(value_parser = template_names())]
+        template: String,
     },
     Config {
         #[arg(short, long)]
@@ -35,7 +36,7 @@ fn main() -> anyhow::Result<()> {
     // order of config, and cli, vars are imp, I can improve it but for now let it be this way
     let config = Config::setup();
     let cli = Cli::parse();
-    let target_dir_path = config.target_dir;
+    let target_dir_path = &config.target_dir;
 
     if !target_dir_path.exists() {
         fs::create_dir(&target_dir_path).expect("target dir creation failed")
@@ -53,8 +54,16 @@ fn main() -> anyhow::Result<()> {
 
             copy_dir_recursive(&src_template_dir, &project_dir_path).unwrap();
         }
+
         Actions::Ls { template } => {
-            println!("Ls command for {template:?}");
+            let path = target_dir_path.join(template);
+
+            fs::read_dir(path).unwrap().for_each(|entry| {
+                let thing = entry.unwrap();
+                if thing.file_type().unwrap().is_dir() {
+                    println!("{}", thing.file_name().into_string().unwrap())
+                }
+            })
         }
         Actions::Config { open } => {
             if open {
