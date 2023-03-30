@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.70"
-clap = { version = "4.1.11", features = ["derive"] }
+clap = { version = "4.1.11", features = ["derive", "string"] }
 dirs = "5.0.0"
 ignore = "0.4.20"
 memorable-wordlist = "0.1.7"

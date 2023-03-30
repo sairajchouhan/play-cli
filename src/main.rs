@@ -1,46 +1,9 @@
 use {
-    clap::{Parser, Subcommand, ValueEnum},
+    clap::{Parser, Subcommand},
     ignore::WalkBuilder,
     serde::{Deserialize, Serialize},
-    std::{fs, path::Path, path::PathBuf, process::Command, str::FromStr},
+    std::{fs, path::Path, path::PathBuf, process::Command},
 };
-
-#[derive(ValueEnum, Clone, Debug)]
-enum Templates {
-    TsNode,
-    TsExpress,
-}
-
-impl Templates {
-    fn get_template_dir(&self) -> PathBuf {
-        let templates_dir = dirs::home_dir()
-            .unwrap()
-            .join("mine")
-            .join("play-cli")
-            .join("templates")
-            .join(self.to_str());
-
-        templates_dir
-    }
-
-    fn to_str(&self) -> &'static str {
-        match self {
-            self::Templates::TsNode => "ts-node",
-            self::Templates::TsExpress => "ts-express",
-        }
-    }
-}
-
-impl FromStr for Templates {
-    type Err = ();
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "ts-node" => Ok(Templates::TsNode),
-            "ts-express" => Ok(Templates::TsExpress),
-            _ => Err(()),
-        }
-    }
-}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -53,14 +16,14 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Actions {
     New {
-        #[arg(value_enum)]
-        template: Templates,
+        #[arg(value_parser = template_names())]
+        template: String,
 
         #[arg(short, long)]
         name: Option<String>,
     },
     Ls {
-        template: Option<Templates>,
+        template: Option<String>,
     },
     Config {
         #[arg(short, long)]
@@ -69,12 +32,9 @@ enum Actions {
 }
 
 fn main() -> anyhow::Result<()> {
+    // order of config, and cli, vars are imp, I can improve it but for now let it be this way
+    let config = Config::setup();
     let cli = Cli::parse();
-
-    init_config().expect("config directory initialization failed");
-
-    let config = get_config();
-
     let target_dir_path = config.target_dir;
 
     if !target_dir_path.exists() {
@@ -83,13 +43,15 @@ fn main() -> anyhow::Result<()> {
 
     match cli.actions {
         Actions::New { template, name } => {
-            let has_template_root_dir = target_dir_path.join(template.to_str()).exists();
+            let has_template_root_dir = target_dir_path.join(&template).exists();
             if !has_template_root_dir {
-                fs::create_dir(target_dir_path.join(template.to_str())).unwrap();
+                fs::create_dir(target_dir_path.join(&template)).unwrap();
             }
             let project_dir = name.unwrap_or(memorable_wordlist::snake_case(32));
-            let project_dir_path = target_dir_path.join(template.to_str()).join(project_dir);
-            copy_dir_recursive(&template.get_template_dir(), &project_dir_path).unwrap();
+            let project_dir_path = target_dir_path.join(&template).join(project_dir);
+            let src_template_dir = config.templates_dir.join(template);
+
+            copy_dir_recursive(&src_template_dir, &project_dir_path).unwrap();
         }
         Actions::Ls { template } => {
             println!("Ls command for {template:?}");
@@ -118,6 +80,22 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn template_names() -> Vec<String> {
+    let templates_dir = get_config().templates_dir;
+    let dir_contents = fs::read_dir(templates_dir).expect("could not read the templates dir");
+    let mut template_names = vec![];
+
+    for item in dir_contents {
+        let item = item.unwrap();
+
+        if item.path().is_dir() {
+            template_names.push(item.file_name().into_string().unwrap())
+        }
+    }
+
+    template_names
 }
 
 fn copy_dir_recursive(src_dir: &PathBuf, dest_dir: &PathBuf) -> anyhow::Result<()> {
@@ -152,37 +130,68 @@ fn copy_dir_recursive(src_dir: &PathBuf, dest_dir: &PathBuf) -> anyhow::Result<(
     Ok(())
 }
 
-fn get_config_dir_path() -> PathBuf {
-    dirs::config_local_dir()
-        .expect("cannot get users local config dir")
-        .join("play-cli")
-        .join("play.json")
-}
-
-fn init_config() -> anyhow::Result<()> {
-    let user_local_config = dirs::config_local_dir().expect("cannot fine users local config dir");
-
-    if !user_local_config.join("play-cli").exists() {
-        fs::create_dir(user_local_config.join("play-cli"))?;
-    }
-
-    if !user_local_config
-        .join("play-cli")
-        .join("play.json")
-        .exists()
-    {
-        let temp = user_local_config.join("play-cli").join("play.json");
-        fs::File::create(&temp)?;
-        fs::write(temp, String::from("{}"))?;
-    }
-
-    Ok(())
-}
-
 #[derive(Serialize, Deserialize)]
 struct Config {
     target_dir: PathBuf,
-    // templates_dir: PathBuf,
+    templates_dir: PathBuf,
+}
+
+impl Config {
+    fn setup() -> Self {
+        let user_local_config =
+            dirs::config_local_dir().expect("cannot fine users local config dir");
+        let config_path = user_local_config.join("play").join("play.json");
+
+        if !user_local_config.join("play").exists() {
+            fs::create_dir(user_local_config.join("play")).expect("failead to create play");
+        }
+
+        if !user_local_config.join("play").join("play.json").exists() {
+            let temp = user_local_config.join("play").join("play.json");
+            fs::File::create(&temp).expect("failed to create play.json");
+            fs::write(
+                user_local_config.join("play").join("play.json"),
+                String::from("{}"),
+            )
+            .unwrap();
+        }
+
+        let target_dir = dirs::home_dir()
+            .expect("could not get the uesr's home dir")
+            .join("playground");
+
+        if !target_dir.exists() {
+            fs::create_dir(&target_dir).expect("cannot create target dir")
+        }
+
+        let templates_dir = target_dir.join(".templates");
+
+        if !templates_dir.exists() {
+            fs::create_dir(&templates_dir).expect("cannot create templates dir")
+        }
+
+        // write the config to the file
+        let config = Config {
+            target_dir: target_dir.clone(),
+            templates_dir: templates_dir.clone(),
+        };
+
+        let config_string = serde_json::to_string(&config).unwrap();
+
+        fs::write(config_path, config_string).unwrap();
+
+        Self {
+            target_dir,
+            templates_dir,
+        }
+    }
+}
+
+fn get_config_dir_path() -> PathBuf {
+    dirs::config_local_dir()
+        .expect("cannot get users local config dir")
+        .join("play")
+        .join("play.json")
 }
 
 fn get_config() -> Config {
