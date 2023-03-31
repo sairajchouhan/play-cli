@@ -11,10 +11,15 @@ use {
 struct Cli {
     #[command(subcommand)]
     actions: Actions,
+
+    /// override the default config path
+    #[arg(short, long)]
+    config_path: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Actions {
+    /// create a new project from a template
     New {
         #[arg(value_parser = template_names())]
         template: String,
@@ -22,10 +27,12 @@ enum Actions {
         #[arg(short, long)]
         name: Option<String>,
     },
+    /// list all the projects created from a template
     Ls {
         #[arg(value_parser = template_names())]
         template: String,
     },
+    /// edit the config file
     Config {
         #[arg(short, long)]
         open: bool,
@@ -34,8 +41,16 @@ enum Actions {
 
 fn main() -> anyhow::Result<()> {
     // order of config, and cli, vars are imp, I can improve it but for now let it be this way
-    let config = Config::setup();
+    let config = Config::setup(None);
+
     let cli = Cli::parse();
+
+    let config = if let Some(custom_config_path) = cli.config_path {
+        Config::setup(Some(&custom_config_path))
+    } else {
+        config
+    };
+
     let target_dir_path = &config.target_dir;
 
     if !target_dir_path.exists() {
@@ -146,52 +161,67 @@ struct Config {
 }
 
 impl Config {
-    fn setup() -> Self {
-        let user_local_config =
-            dirs::config_local_dir().expect("cannot fine users local config dir");
-        let config_path = user_local_config.join("play").join("play.json");
+    fn setup(custom_config_path: Option<&PathBuf>) -> Self {
+        if let Some(config_path) = custom_config_path {
+            let config_string = fs::read_to_string(config_path).unwrap();
+            let config  = serde_json::from_str::<Config>(config_string.as_str());
 
-        if !user_local_config.join("play").exists() {
-            fs::create_dir(user_local_config.join("play")).expect("failead to create play");
-        }
+            match config {
+                Ok(value) => {
+                    value
+                }
+                Err(_) => {
+                    error("failed to parse the config file, please check the format")
+                }
+            }
+                
+            // TODO: validate that the user has created the target and the templates dir and that they are valid
+        } else {
+            let user_local_config =
+                dirs::config_local_dir().expect("cannot fine users local config dir");
+            let config_path = user_local_config.join("play").join("play.json");
 
-        if !user_local_config.join("play").join("play.json").exists() {
-            let temp = user_local_config.join("play").join("play.json");
-            fs::File::create(&temp).expect("failed to create play.json");
-            fs::write(
-                user_local_config.join("play").join("play.json"),
-                String::from("{}"),
-            )
-            .unwrap();
-        }
+            if !user_local_config.join("play").exists() {
+                fs::create_dir(user_local_config.join("play")).expect("failead to create play");
+            }
 
-        let target_dir = dirs::home_dir()
-            .expect("could not get the uesr's home dir")
-            .join("playground");
+            if !user_local_config.join("play").join("play.json").exists() {
+                let temp = user_local_config.join("play").join("play.json");
+                fs::File::create(&temp).expect("failed to create play.json");
+                fs::write(
+                    user_local_config.join("play").join("play.json"),
+                    String::from("{}"),
+                )
+                .unwrap();
+            }
+            let target_dir = dirs::home_dir()
+                .expect("could not get the uesr's home dir")
+                .join("playground");
 
-        if !target_dir.exists() {
-            fs::create_dir(&target_dir).expect("cannot create target dir")
-        }
+            if !target_dir.exists() {
+                fs::create_dir(&target_dir).expect("cannot create target dir")
+            }
 
-        let templates_dir = target_dir.join(".templates");
+            let templates_dir = target_dir.join(".templates");
 
-        if !templates_dir.exists() {
-            fs::create_dir(&templates_dir).expect("cannot create templates dir")
-        }
+            if !templates_dir.exists() {
+                fs::create_dir(&templates_dir).expect("cannot create templates dir")
+            }
 
-        // write the config to the file
-        let config = Config {
-            target_dir: target_dir.clone(),
-            templates_dir: templates_dir.clone(),
-        };
+            // write the config to the file
+            let config = Config {
+                target_dir: target_dir.clone(),
+                templates_dir: templates_dir.clone(),
+            };
 
-        let config_string = serde_json::to_string(&config).unwrap();
+            let config_string = serde_json::to_string(&config).unwrap();
 
-        fs::write(config_path, config_string).unwrap();
+            fs::write(config_path, config_string).unwrap();
 
-        Self {
-            target_dir,
-            templates_dir,
+            Self {
+                target_dir,
+                templates_dir,
+            }
         }
     }
 }
@@ -208,4 +238,9 @@ fn get_config() -> Config {
     let config_string = fs::read_to_string(config_dir_path).unwrap();
     serde_json::from_str::<Config>(config_string.as_str())
         .expect("parsing json from string to Config failed")
+}
+
+fn error(message: &str) -> ! {
+    eprintln!("{}", message);
+    std::process::exit(1);
 }
