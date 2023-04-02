@@ -1,51 +1,12 @@
-#![allow(unused)]
-
-use clap::{command, Arg, ArgAction};
-
 use {
-    clap::{arg, Command, Parser, Subcommand},
+    clap::{command, Arg, ArgAction, Command},
     ignore::WalkBuilder,
     serde::{Deserialize, Serialize},
     std::{env, fs, path::Path, path::PathBuf},
 };
 
-// #[derive(Parser, Debug)]
-// #[command(author, version, about, long_about = None)]
-// #[command(propagate_version = true)]
-// struct Cli {
-//     #[command(subcommand)]
-//     actions: Actions,
-//
-//     /// override the default config path
-//     #[arg(short, long)]
-//     config_path: Option<PathBuf>,
-// }
-//
-// #[derive(Subcommand, Debug)]
-// enum Actions {
-//     /// create a new project from a template
-//     New {
-//         #[arg(value_parser = template_names())]
-//         template: String,
-//
-//         #[arg(short, long)]
-//         name: Option<String>,
-//     },
-//     /// list all the projects created from a template
-//     Ls {
-//         #[arg(value_parser = template_names())]
-//         template: String,
-//     },
-//     /// edit the config file
-//     Config {
-//         #[arg(short, long)]
-//         open: bool,
-//     },
-// }
-
 fn main() -> anyhow::Result<()> {
-    let custom_config_path = env::var("PLAY_CONFIG").ok().map(|x| PathBuf::from(x));
-    let config = Config::setup(custom_config_path);
+    let config = Config::setup();
 
     let matches = command!()
         .arg_required_else_help(true)
@@ -86,7 +47,6 @@ fn main() -> anyhow::Result<()> {
                         .action(ArgAction::SetTrue)
                         .help("open the config file in the default editor"),
                 )
-                .arg_required_else_help(true),
         )
         .get_matches();
 
@@ -215,79 +175,60 @@ struct Config {
 }
 
 impl Config {
-    fn setup(custom_config_path: Option<PathBuf>) -> Self {
-        if let Some(config_path) = custom_config_path {
-            let config_string = fs::read_to_string(config_path).unwrap();
-            let config = serde_json::from_str::<Config>(config_string.as_str());
+    fn setup() -> Self {
+        let config_path = get_config_dir_path();
+        let is_custom_config = env::var("PLAY_CONFIG").is_ok();
 
-            match config {
-                Ok(value) => value,
-                Err(_) => error("failed to parse the config file, please check the format"),
+        if is_custom_config {
+            if !config_path.exists() {
+                // NOTE: can prompt for asking "should we create the file for you ?"
+                error("the config file does not exist, please create it");
+            } else {
+                let config_string = fs::read_to_string(&config_path).unwrap();
+                let config = serde_json::from_str::<Config>(&config_string).unwrap();
+                return config;
             }
-
-            // TODO: validate that the user has created the target and the templates dir and that they are valid
         } else {
-            let user_local_config =
-                dirs::config_local_dir().expect("cannot fine users local config dir");
-            let config_path = user_local_config.join("play").join("play.json");
+            if !config_path.exists() {
+                fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+                fs::File::create(&config_path).unwrap();
 
-            if !user_local_config.join("play").exists() {
-                fs::create_dir(user_local_config.join("play")).expect("failead to create play");
-            }
+                let user_home_dir = dirs::home_dir().expect("cannot find the users home dir");
+                let target_dir = user_home_dir.join("playground");
+                let templates_dir = user_home_dir.join("playground").join(".templates");
 
-            if !user_local_config.join("play").join("play.json").exists() {
-                let temp = user_local_config.join("play").join("play.json");
-                fs::File::create(&temp).expect("failed to create play.json");
-                fs::write(
-                    user_local_config.join("play").join("play.json"),
-                    String::from("{}"),
-                )
-                .unwrap();
-            }
-            let target_dir = dirs::home_dir()
-                .expect("could not get the uesr's home dir")
-                .join("playground");
+                fs::create_dir_all(&target_dir).unwrap();
+                fs::create_dir_all(&templates_dir).unwrap();
 
-            if !target_dir.exists() {
-                fs::create_dir(&target_dir).expect("cannot create target dir")
-            }
+                let default_config = Config {
+                    target_dir,
+                    templates_dir,
+                };
+                let config_string =
+                    serde_json::to_string(&default_config).expect("failed to serialize the config");
 
-            let templates_dir = target_dir.join(".templates");
+                fs::write(&config_path, config_string).unwrap();
 
-            if !templates_dir.exists() {
-                fs::create_dir(&templates_dir).expect("cannot create templates dir")
-            }
-
-            // write the config to the file
-            let config = Config {
-                target_dir: target_dir.clone(),
-                templates_dir: templates_dir.clone(),
-            };
-
-            let config_string = serde_json::to_string(&config).unwrap();
-
-            fs::write(config_path, config_string).unwrap();
-
-            Self {
-                target_dir,
-                templates_dir,
+                return default_config;
+            } else {
+                let config_string = fs::read_to_string(&config_path).unwrap();
+                let config = serde_json::from_str::<Config>(&config_string).unwrap();
+                return config;
             }
         }
     }
 }
 
 fn get_config_dir_path() -> PathBuf {
-    dirs::config_local_dir()
-        .expect("cannot get users local config dir")
-        .join("play")
-        .join("play.json")
-}
-
-fn get_config() -> Config {
-    let config_dir_path = get_config_dir_path();
-    let config_string = fs::read_to_string(config_dir_path).unwrap();
-    serde_json::from_str::<Config>(config_string.as_str())
-        .expect("parsing json from string to Config failed")
+    env::var("PLAY_CONFIG")
+        .ok()
+        .map(|x| PathBuf::from(x))
+        .unwrap_or_else(|| {
+            dirs::config_local_dir()
+                .expect("cannot get users local config dir")
+                .join("play")
+                .join("play.json")
+        })
 }
 
 fn error(message: &str) -> ! {
