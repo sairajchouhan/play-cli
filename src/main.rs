@@ -1,106 +1,78 @@
+#![allow(unused)]
+
+use clap::{command, Arg};
+
 use {
-    clap::{Parser, Subcommand},
+    clap::{arg, Command, Parser, Subcommand},
     ignore::WalkBuilder,
     serde::{Deserialize, Serialize},
-    std::{fs, path::Path, path::PathBuf, process::Command},
+    std::{fs, path::Path, path::PathBuf},
 };
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-#[command(propagate_version = true)]
-struct Cli {
-    #[command(subcommand)]
-    actions: Actions,
-
-    /// override the default config path
-    #[arg(short, long)]
-    config_path: Option<PathBuf>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Actions {
-    /// create a new project from a template
-    New {
-        #[arg(value_parser = template_names())]
-        template: String,
-
-        #[arg(short, long)]
-        name: Option<String>,
-    },
-    /// list all the projects created from a template
-    Ls {
-        #[arg(value_parser = template_names())]
-        template: String,
-    },
-    /// edit the config file
-    Config {
-        #[arg(short, long)]
-        open: bool,
-    },
-}
+// #[derive(Parser, Debug)]
+// #[command(author, version, about, long_about = None)]
+// #[command(propagate_version = true)]
+// struct Cli {
+//     #[command(subcommand)]
+//     actions: Actions,
+//
+//     /// override the default config path
+//     #[arg(short, long)]
+//     config_path: Option<PathBuf>,
+// }
+//
+// #[derive(Subcommand, Debug)]
+// enum Actions {
+//     /// create a new project from a template
+//     New {
+//         #[arg(value_parser = template_names())]
+//         template: String,
+//
+//         #[arg(short, long)]
+//         name: Option<String>,
+//     },
+//     /// list all the projects created from a template
+//     Ls {
+//         #[arg(value_parser = template_names())]
+//         template: String,
+//     },
+//     /// edit the config file
+//     Config {
+//         #[arg(short, long)]
+//         open: bool,
+//     },
+// }
 
 fn main() -> anyhow::Result<()> {
-    // order of config, and cli, vars are imp, I can improve it but for now let it be this way
-    let config = Config::setup(None);
+    let matches = command!()
+        .arg_required_else_help(true)
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("new")
+                .about("create a new project from a template")
+                .arg(Arg::new("name").short('n').long("name"))
+                .arg(Arg::new("template").value_parser(template_names()))
+                .arg_required_else_help(true),
+        )
+        .subcommand(
+            Command::new("ls")
+                .about("list all the projects created from a template")
+                .arg(
+                    Arg::new("template")
+                        .short('t')
+                        .long("template")
+                        .value_parser(template_names()),
+                )
+                .arg_required_else_help(true),
+        )
+        .get_matches();
 
-    let cli = Cli::parse();
-
-    let config = if let Some(custom_config_path) = cli.config_path {
-        Config::setup(Some(&custom_config_path))
-    } else {
-        config
-    };
-
-    let target_dir_path = &config.target_dir;
-
-    if !target_dir_path.exists() {
-        fs::create_dir(&target_dir_path).expect("target dir creation failed")
-    }
-
-    match cli.actions {
-        Actions::New { template, name } => {
-            let has_template_root_dir = target_dir_path.join(&template).exists();
-            if !has_template_root_dir {
-                fs::create_dir(target_dir_path.join(&template)).unwrap();
-            }
-            let project_dir = name.unwrap_or(memorable_wordlist::snake_case(32));
-            let project_dir_path = target_dir_path.join(&template).join(project_dir);
-            let src_template_dir = config.templates_dir.join(template);
-
-            copy_dir_recursive(&src_template_dir, &project_dir_path).unwrap();
-        }
-
-        Actions::Ls { template } => {
-            let path = target_dir_path.join(template);
-
-            fs::read_dir(path).unwrap().for_each(|entry| {
-                let thing = entry.unwrap();
-                if thing.file_type().unwrap().is_dir() {
-                    println!("{}", thing.file_name().into_string().unwrap())
-                }
-            })
-        }
-        Actions::Config { open } => {
-            if open {
-                let editor = std::env::var("EDITOR").unwrap();
-                let file_path = get_config_dir_path();
-
-                Command::new(editor)
-                    .arg(&file_path)
-                    .status()
-                    .expect("Something went wrong");
-            } else {
-                let config = fs::read_to_string(get_config_dir_path());
-                match config {
-                    Ok(value) => {
-                        println!("{}", value)
-                    }
-                    Err(e) => {
-                        eprintln!("{e:?}");
-                    }
-                }
-            }
-        }
+    match matches.subcommand() {
+        Some(("add", sub_matches)) => println!(
+            "'myapp add' was used, name is: {:?}",
+            sub_matches.get_one::<String>("NAME")
+        ),
+        _ => unreachable!("Exhausted list of subcommands and subcommand_required prevents `None`"),
     }
 
     Ok(())
@@ -164,17 +136,13 @@ impl Config {
     fn setup(custom_config_path: Option<&PathBuf>) -> Self {
         if let Some(config_path) = custom_config_path {
             let config_string = fs::read_to_string(config_path).unwrap();
-            let config  = serde_json::from_str::<Config>(config_string.as_str());
+            let config = serde_json::from_str::<Config>(config_string.as_str());
 
             match config {
-                Ok(value) => {
-                    value
-                }
-                Err(_) => {
-                    error("failed to parse the config file, please check the format")
-                }
+                Ok(value) => value,
+                Err(_) => error("failed to parse the config file, please check the format"),
             }
-                
+
             // TODO: validate that the user has created the target and the templates dir and that they are valid
         } else {
             let user_local_config =
