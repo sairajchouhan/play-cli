@@ -1,12 +1,12 @@
 #![allow(unused)]
 
-use clap::{command, Arg};
+use clap::{command, Arg, ArgAction};
 
 use {
     clap::{arg, Command, Parser, Subcommand},
     ignore::WalkBuilder,
     serde::{Deserialize, Serialize},
-    std::{fs, path::Path, path::PathBuf},
+    std::{env, fs, path::Path, path::PathBuf},
 };
 
 // #[derive(Parser, Debug)]
@@ -44,14 +44,26 @@ use {
 // }
 
 fn main() -> anyhow::Result<()> {
+    let custom_config_path = env::var("PLAY_CONFIG").ok().map(|x| PathBuf::from(x));
+    let config = Config::setup(custom_config_path);
+
     let matches = command!()
         .arg_required_else_help(true)
         .subcommand_required(true)
         .subcommand(
             Command::new("new")
                 .about("create a new project from a template")
-                .arg(Arg::new("name").short('n').long("name"))
-                .arg(Arg::new("template").value_parser(template_names()))
+                .arg(
+                    Arg::new("template")
+                        .value_parser(template_names(&config))
+                        .required(true),
+                )
+                .arg(
+                    Arg::new("name")
+                        .short('n')
+                        .long("name")
+                        .help("name of the project"),
+                )
                 .arg_required_else_help(true),
         )
         .subcommand(
@@ -59,27 +71,97 @@ fn main() -> anyhow::Result<()> {
                 .about("list all the projects created from a template")
                 .arg(
                     Arg::new("template")
-                        .short('t')
-                        .long("template")
-                        .value_parser(template_names()),
+                        .value_parser(template_names(&config))
+                        .required(true),
+                )
+                .arg_required_else_help(true),
+        )
+        .subcommand(
+            Command::new("config")
+                .about("config file")
+                .arg(
+                    Arg::new("open")
+                        .short('o')
+                        .long("open")
+                        .action(ArgAction::SetTrue)
+                        .help("open the config file in the default editor"),
                 )
                 .arg_required_else_help(true),
         )
         .get_matches();
 
     match matches.subcommand() {
-        Some(("add", sub_matches)) => println!(
-            "'myapp add' was used, name is: {:?}",
-            sub_matches.get_one::<String>("NAME")
-        ),
-        _ => unreachable!("Exhausted list of subcommands and subcommand_required prevents `None`"),
+        Some((subcommand, sub_matches)) => match subcommand {
+            "new" => {
+                let template = sub_matches.get_one::<String>("template").unwrap();
+                let name = sub_matches.get_one::<String>("name");
+
+                let target_dir_path = config.target_dir;
+                let has_template_root_dir = target_dir_path.join(&template).exists();
+                if !has_template_root_dir {
+                    fs::create_dir(target_dir_path.join(&template)).unwrap();
+                }
+
+                let fancy_name = memorable_wordlist::snake_case(32).clone();
+                let project_dir = if let Some(thing) = name {
+                    thing
+                } else {
+                    &fancy_name
+                };
+
+                let project_dir_path = target_dir_path.join(&template).join(project_dir);
+                let src_template_dir = config.templates_dir.join(template);
+
+                copy_dir_recursive(&src_template_dir, &project_dir_path).unwrap();
+            }
+            "ls" => {
+                let template = sub_matches.get_one::<String>("template").unwrap();
+                let path = &config.target_dir.join(template);
+
+                fs::read_dir(path).unwrap().for_each(|entry| {
+                    let thing = entry.unwrap();
+                    if thing.file_type().unwrap().is_dir() {
+                        println!("{}", thing.file_name().into_string().unwrap())
+                    }
+                })
+            }
+            "config" => {
+                let open = sub_matches.get_flag("open");
+                if open {
+                    let editor = std::env::var("EDITOR").unwrap();
+                    let file_path = get_config_dir_path();
+
+                    std::process::Command::new(editor)
+                        .arg(&file_path)
+                        .status()
+                        .expect("Something went wrong");
+                } else {
+                    let config = fs::read_to_string(get_config_dir_path());
+
+                    match config {
+                        Ok(value) => {
+                            println!("{}", value)
+                        }
+                        Err(e) => {
+                            eprintln!("{e:?}");
+                        }
+                    }
+                }
+            }
+            _ => {
+                error("Bro what are you doing");
+            }
+        },
+        None => {
+            error("Bro what are you doing");
+        }
     }
 
     Ok(())
 }
 
-fn template_names() -> Vec<String> {
-    let templates_dir = get_config().templates_dir;
+fn template_names(config: &Config) -> Vec<String> {
+    let templates_dir = &config.templates_dir;
     let dir_contents = fs::read_dir(templates_dir).expect("could not read the templates dir");
     let mut template_names = vec![];
 
@@ -133,7 +215,7 @@ struct Config {
 }
 
 impl Config {
-    fn setup(custom_config_path: Option<&PathBuf>) -> Self {
+    fn setup(custom_config_path: Option<PathBuf>) -> Self {
         if let Some(config_path) = custom_config_path {
             let config_string = fs::read_to_string(config_path).unwrap();
             let config = serde_json::from_str::<Config>(config_string.as_str());
