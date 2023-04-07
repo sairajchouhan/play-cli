@@ -2,7 +2,14 @@ use {
     clap::{command, Arg, ArgAction, Command},
     ignore::WalkBuilder,
     serde::{Deserialize, Serialize},
-    std::{env, fs, path::Path, path::PathBuf},
+    std::{
+        collections::HashMap,
+        env, fs,
+        io::{self, Write},
+        path::Path,
+        path::PathBuf,
+        process, thread,
+    },
 };
 
 fn main() -> anyhow::Result<()> {
@@ -38,15 +45,13 @@ fn main() -> anyhow::Result<()> {
                 .arg_required_else_help(true),
         )
         .subcommand(
-            Command::new("config")
-                .about("config file")
-                .arg(
-                    Arg::new("open")
-                        .short('o')
-                        .long("open")
-                        .action(ArgAction::SetTrue)
-                        .help("open the config file in the default editor"),
-                )
+            Command::new("config").about("config file").arg(
+                Arg::new("open")
+                    .short('o')
+                    .long("open")
+                    .action(ArgAction::SetTrue)
+                    .help("open the config file in the default editor"),
+            ),
         )
         .get_matches();
 
@@ -70,9 +75,50 @@ fn main() -> anyhow::Result<()> {
                 };
 
                 let project_dir_path = target_dir_path.join(&template).join(project_dir);
-                let src_template_dir = config.templates_dir.join(template);
 
-                copy_dir_recursive(&src_template_dir, &project_dir_path).unwrap();
+                let template_hash_map_option = config.external.get(template);
+
+                match template_hash_map_option {
+                    Some(cmd) => {
+                        let mut commands = cmd.split_whitespace();
+
+                        let first_command = &commands.next().unwrap();
+                        let rest_of_commands = commands.collect::<Vec<&str>>();
+
+                        let mut child = std::process::Command::new(first_command)
+                            .args(rest_of_commands)
+                            .stdin(process::Stdio::piped())
+                            .stdout(process::Stdio::inherit())
+                            .stderr(process::Stdio::inherit())
+                            .spawn()?;
+
+                        // let stdin_handle = child.stdin.as_mut().unwrap();
+                        // thread::spawn(move || -> io::Result<()> {
+                        //     let mut stdin = io::stdin();
+                        //     let mut buffer = String::new();
+                        //     stdin.read_line(&mut buffer)?;
+                        //     stdin_handle.write_all(buffer.as_bytes())?;
+                        //     Ok(())
+                        // });
+
+                        // match output {
+                        //     Ok(value) => {
+                        //         let stdout = String::from_utf8(value.stdout).unwrap();
+                        //         let stderr = String::from_utf8(value.stderr).unwrap();
+                        //
+                        //         println!("stdout => {}", stdout);
+                        //         println!("stderr => {}", stderr);
+                        //     }
+                        //     Err(e) => {
+                        //         eprintln!("{:?}", e);
+                        //     }
+                        // }
+                    }
+                    None => {
+                        let src_template_dir = config.templates_dir.join(template);
+                        copy_dir_recursive(&src_template_dir, &project_dir_path).unwrap();
+                    }
+                }
             }
             "ls" => {
                 let template = sub_matches.get_one::<String>("template").unwrap();
@@ -123,7 +169,7 @@ fn main() -> anyhow::Result<()> {
 fn template_names(config: &Config) -> Vec<String> {
     let templates_dir = &config.templates_dir;
     let dir_contents = fs::read_dir(templates_dir).expect("could not read the templates dir");
-    let mut template_names = vec![];
+    let mut template_names: Vec<String> = vec![];
 
     for item in dir_contents {
         let item = item.unwrap();
@@ -131,6 +177,11 @@ fn template_names(config: &Config) -> Vec<String> {
         if item.path().is_dir() {
             template_names.push(item.file_name().into_string().unwrap())
         }
+    }
+
+    for item in &config.external {
+        let key = item.0;
+        template_names.push(key.clone());
     }
 
     template_names
@@ -168,10 +219,11 @@ fn copy_dir_recursive(src_dir: &PathBuf, dest_dir: &PathBuf) -> anyhow::Result<(
     Ok(())
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Config {
     target_dir: PathBuf,
     templates_dir: PathBuf,
+    external: HashMap<String, String>,
 }
 
 impl Config {
@@ -203,6 +255,7 @@ impl Config {
                 let default_config = Config {
                     target_dir,
                     templates_dir,
+                    external: HashMap::new(),
                 };
                 let config_string =
                     serde_json::to_string(&default_config).expect("failed to serialize the config");
