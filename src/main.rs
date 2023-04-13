@@ -1,115 +1,175 @@
 use {
-    clap::{Parser, Subcommand},
+    clap::{command, Arg, ArgAction, Command},
     ignore::WalkBuilder,
     serde::{Deserialize, Serialize},
-    std::{fs, path::Path, path::PathBuf, process::Command},
+    std::{
+        collections::HashMap,
+        env, fs,
+        io::{self, Write},
+        path::Path,
+        path::PathBuf,
+        process, thread,
+    },
 };
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-#[command(propagate_version = true)]
-struct Cli {
-    #[command(subcommand)]
-    actions: Actions,
-
-    /// override the default config path
-    #[arg(short, long)]
-    config_path: Option<PathBuf>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Actions {
-    /// create a new project from a template
-    New {
-        #[arg(value_parser = template_names())]
-        template: String,
-
-        #[arg(short, long)]
-        name: Option<String>,
-    },
-    /// list all the projects created from a template
-    Ls {
-        #[arg(value_parser = template_names())]
-        template: String,
-    },
-    /// edit the config file
-    Config {
-        #[arg(short, long)]
-        open: bool,
-    },
-}
-
 fn main() -> anyhow::Result<()> {
-    // order of config, and cli, vars are imp, I can improve it but for now let it be this way
-    let config = Config::setup(None);
+    let config = Config::setup();
 
-    let cli = Cli::parse();
+    let matches = command!()
+        .arg_required_else_help(true)
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("new")
+                .about("create a new project from a template")
+                .arg(
+                    Arg::new("template")
+                        .value_parser(template_names(&config))
+                        .required(true),
+                )
+                .arg(
+                    Arg::new("name")
+                        .short('n')
+                        .long("name")
+                        .help("name of the project"),
+                )
+                .arg_required_else_help(true),
+        )
+        .subcommand(
+            Command::new("ls")
+                .about("list all the projects created from a template")
+                .arg(
+                    Arg::new("template")
+                        .value_parser(template_names(&config))
+                        .required(true),
+                )
+                .arg_required_else_help(true),
+        )
+        .subcommand(
+            Command::new("config").about("config file").arg(
+                Arg::new("open")
+                    .short('o')
+                    .long("open")
+                    .action(ArgAction::SetTrue)
+                    .help("open the config file in the default editor"),
+            ),
+        )
+        .get_matches();
 
-    let config = if let Some(custom_config_path) = cli.config_path {
-        Config::setup(Some(&custom_config_path))
-    } else {
-        config
-    };
+    match matches.subcommand() {
+        Some((subcommand, sub_matches)) => match subcommand {
+            "new" => {
+                let template = sub_matches.get_one::<String>("template").unwrap();
+                let name = sub_matches.get_one::<String>("name");
 
-    let target_dir_path = &config.target_dir;
-
-    if !target_dir_path.exists() {
-        fs::create_dir(&target_dir_path).expect("target dir creation failed")
-    }
-
-    match cli.actions {
-        Actions::New { template, name } => {
-            let has_template_root_dir = target_dir_path.join(&template).exists();
-            if !has_template_root_dir {
-                fs::create_dir(target_dir_path.join(&template)).unwrap();
-            }
-            let project_dir = name.unwrap_or(memorable_wordlist::snake_case(32));
-            let project_dir_path = target_dir_path.join(&template).join(project_dir);
-            let src_template_dir = config.templates_dir.join(template);
-
-            copy_dir_recursive(&src_template_dir, &project_dir_path).unwrap();
-        }
-
-        Actions::Ls { template } => {
-            let path = target_dir_path.join(template);
-
-            fs::read_dir(path).unwrap().for_each(|entry| {
-                let thing = entry.unwrap();
-                if thing.file_type().unwrap().is_dir() {
-                    println!("{}", thing.file_name().into_string().unwrap())
+                let target_dir_path = config.target_dir;
+                let has_template_root_dir = target_dir_path.join(&template).exists();
+                if !has_template_root_dir {
+                    fs::create_dir(target_dir_path.join(&template)).unwrap();
                 }
-            })
-        }
-        Actions::Config { open } => {
-            if open {
-                let editor = std::env::var("EDITOR").unwrap();
-                let file_path = get_config_dir_path();
 
-                Command::new(editor)
-                    .arg(&file_path)
-                    .status()
-                    .expect("Something went wrong");
-            } else {
-                let config = fs::read_to_string(get_config_dir_path());
-                match config {
-                    Ok(value) => {
-                        println!("{}", value)
+                let fancy_name = memorable_wordlist::snake_case(32).clone();
+                let project_dir = if let Some(thing) = name {
+                    thing
+                } else {
+                    &fancy_name
+                };
+
+                let project_dir_path = target_dir_path.join(&template).join(project_dir);
+
+                let template_hash_map_option = config.external.get(template);
+
+                match template_hash_map_option {
+                    Some(cmd) => {
+                        let mut commands = cmd.split_whitespace();
+
+                        let first_command = &commands.next().unwrap();
+                        let rest_of_commands = commands.collect::<Vec<&str>>();
+
+                        let mut child = std::process::Command::new(first_command)
+                            .args(rest_of_commands)
+                            .stdin(process::Stdio::piped())
+                            .stdout(process::Stdio::inherit())
+                            .stderr(process::Stdio::inherit())
+                            .spawn()?;
+
+                        // let stdin_handle = child.stdin.as_mut().unwrap();
+                        // thread::spawn(move || -> io::Result<()> {
+                        //     let mut stdin = io::stdin();
+                        //     let mut buffer = String::new();
+                        //     stdin.read_line(&mut buffer)?;
+                        //     stdin_handle.write_all(buffer.as_bytes())?;
+                        //     Ok(())
+                        // });
+
+                        // match output {
+                        //     Ok(value) => {
+                        //         let stdout = String::from_utf8(value.stdout).unwrap();
+                        //         let stderr = String::from_utf8(value.stderr).unwrap();
+                        //
+                        //         println!("stdout => {}", stdout);
+                        //         println!("stderr => {}", stderr);
+                        //     }
+                        //     Err(e) => {
+                        //         eprintln!("{:?}", e);
+                        //     }
+                        // }
                     }
-                    Err(e) => {
-                        eprintln!("{e:?}");
+                    None => {
+                        let src_template_dir = config.templates_dir.join(template);
+                        copy_dir_recursive(&src_template_dir, &project_dir_path).unwrap();
                     }
                 }
             }
+            "ls" => {
+                let template = sub_matches.get_one::<String>("template").unwrap();
+                let path = &config.target_dir.join(template);
+
+                fs::read_dir(path).unwrap().for_each(|entry| {
+                    let thing = entry.unwrap();
+                    if thing.file_type().unwrap().is_dir() {
+                        println!("{}", thing.file_name().into_string().unwrap())
+                    }
+                })
+            }
+            "config" => {
+                let open = sub_matches.get_flag("open");
+                if open {
+                    let editor = std::env::var("EDITOR").unwrap();
+                    let file_path = get_config_dir_path();
+
+                    std::process::Command::new(editor)
+                        .arg(&file_path)
+                        .status()
+                        .expect("Something went wrong");
+                } else {
+                    let config = fs::read_to_string(get_config_dir_path());
+
+                    match config {
+                        Ok(value) => {
+                            println!("{}", value)
+                        }
+                        Err(e) => {
+                            eprintln!("{e:?}");
+                        }
+                    }
+                }
+            }
+            _ => {
+                error("Bro what are you doing");
+            }
+        },
+        None => {
+            error("Bro what are you doing");
         }
     }
 
     Ok(())
 }
 
-fn template_names() -> Vec<String> {
-    let templates_dir = get_config().templates_dir;
+fn template_names(config: &Config) -> Vec<String> {
+    let templates_dir = &config.templates_dir;
     let dir_contents = fs::read_dir(templates_dir).expect("could not read the templates dir");
-    let mut template_names = vec![];
+    let mut template_names: Vec<String> = vec![];
 
     for item in dir_contents {
         let item = item.unwrap();
@@ -117,6 +177,11 @@ fn template_names() -> Vec<String> {
         if item.path().is_dir() {
             template_names.push(item.file_name().into_string().unwrap())
         }
+    }
+
+    for item in &config.external {
+        let key = item.0;
+        template_names.push(key.clone());
     }
 
     template_names
@@ -154,90 +219,69 @@ fn copy_dir_recursive(src_dir: &PathBuf, dest_dir: &PathBuf) -> anyhow::Result<(
     Ok(())
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Config {
     target_dir: PathBuf,
     templates_dir: PathBuf,
+    external: HashMap<String, String>,
 }
 
 impl Config {
-    fn setup(custom_config_path: Option<&PathBuf>) -> Self {
-        if let Some(config_path) = custom_config_path {
-            let config_string = fs::read_to_string(config_path).unwrap();
-            let config  = serde_json::from_str::<Config>(config_string.as_str());
+    fn setup() -> Self {
+        let config_path = get_config_dir_path();
+        let is_custom_config = env::var("PLAY_CONFIG").is_ok();
 
-            match config {
-                Ok(value) => {
-                    value
-                }
-                Err(_) => {
-                    error("failed to parse the config file, please check the format")
-                }
+        if is_custom_config {
+            if !config_path.exists() {
+                // NOTE: can prompt for asking "should we create the file for you ?"
+                error("the config file does not exist, please create it");
+            } else {
+                let config_string = fs::read_to_string(&config_path).unwrap();
+                let config = serde_json::from_str::<Config>(&config_string).unwrap();
+                return config;
             }
-                
-            // TODO: validate that the user has created the target and the templates dir and that they are valid
         } else {
-            let user_local_config =
-                dirs::config_local_dir().expect("cannot fine users local config dir");
-            let config_path = user_local_config.join("play").join("play.json");
+            if !config_path.exists() {
+                fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+                fs::File::create(&config_path).unwrap();
 
-            if !user_local_config.join("play").exists() {
-                fs::create_dir(user_local_config.join("play")).expect("failead to create play");
-            }
+                let user_home_dir = dirs::home_dir().expect("cannot find the users home dir");
+                let target_dir = user_home_dir.join("playground");
+                let templates_dir = user_home_dir.join("playground").join(".templates");
 
-            if !user_local_config.join("play").join("play.json").exists() {
-                let temp = user_local_config.join("play").join("play.json");
-                fs::File::create(&temp).expect("failed to create play.json");
-                fs::write(
-                    user_local_config.join("play").join("play.json"),
-                    String::from("{}"),
-                )
-                .unwrap();
-            }
-            let target_dir = dirs::home_dir()
-                .expect("could not get the uesr's home dir")
-                .join("playground");
+                fs::create_dir_all(&target_dir).unwrap();
+                fs::create_dir_all(&templates_dir).unwrap();
 
-            if !target_dir.exists() {
-                fs::create_dir(&target_dir).expect("cannot create target dir")
-            }
+                let default_config = Config {
+                    target_dir,
+                    templates_dir,
+                    external: HashMap::new(),
+                };
+                let config_string =
+                    serde_json::to_string(&default_config).expect("failed to serialize the config");
 
-            let templates_dir = target_dir.join(".templates");
+                fs::write(&config_path, config_string).unwrap();
 
-            if !templates_dir.exists() {
-                fs::create_dir(&templates_dir).expect("cannot create templates dir")
-            }
-
-            // write the config to the file
-            let config = Config {
-                target_dir: target_dir.clone(),
-                templates_dir: templates_dir.clone(),
-            };
-
-            let config_string = serde_json::to_string(&config).unwrap();
-
-            fs::write(config_path, config_string).unwrap();
-
-            Self {
-                target_dir,
-                templates_dir,
+                return default_config;
+            } else {
+                let config_string = fs::read_to_string(&config_path).unwrap();
+                let config = serde_json::from_str::<Config>(&config_string).unwrap();
+                return config;
             }
         }
     }
 }
 
 fn get_config_dir_path() -> PathBuf {
-    dirs::config_local_dir()
-        .expect("cannot get users local config dir")
-        .join("play")
-        .join("play.json")
-}
-
-fn get_config() -> Config {
-    let config_dir_path = get_config_dir_path();
-    let config_string = fs::read_to_string(config_dir_path).unwrap();
-    serde_json::from_str::<Config>(config_string.as_str())
-        .expect("parsing json from string to Config failed")
+    env::var("PLAY_CONFIG")
+        .ok()
+        .map(|x| PathBuf::from(x))
+        .unwrap_or_else(|| {
+            dirs::config_local_dir()
+                .expect("cannot get users local config dir")
+                .join("play")
+                .join("play.json")
+        })
 }
 
 fn error(message: &str) -> ! {
