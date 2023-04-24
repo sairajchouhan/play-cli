@@ -2,14 +2,7 @@ use {
     clap::{command, Arg, ArgAction, Command},
     ignore::WalkBuilder,
     serde::{Deserialize, Serialize},
-    std::{
-        collections::HashMap,
-        env, fs,
-        io::{self, Write},
-        path::Path,
-        path::PathBuf,
-        process, thread,
-    },
+    std::{collections::HashMap, env, fs, path::Path, path::PathBuf},
 };
 
 fn main() -> anyhow::Result<()> {
@@ -31,6 +24,12 @@ fn main() -> anyhow::Result<()> {
                         .short('n')
                         .long("name")
                         .help("name of the project"),
+                )
+                .arg(
+                    Arg::new("tempfile")
+                        .long("tempfile")
+                        .hide(false)
+                        .required(false)
                 )
                 .arg_required_else_help(true),
         )
@@ -80,39 +79,8 @@ fn main() -> anyhow::Result<()> {
 
                 match template_hash_map_option {
                     Some(cmd) => {
-                        let mut commands = cmd.split_whitespace();
-
-                        let first_command = &commands.next().unwrap();
-                        let rest_of_commands = commands.collect::<Vec<&str>>();
-
-                        let mut child = std::process::Command::new(first_command)
-                            .args(rest_of_commands)
-                            .stdin(process::Stdio::piped())
-                            .stdout(process::Stdio::inherit())
-                            .stderr(process::Stdio::inherit())
-                            .spawn()?;
-
-                        // let stdin_handle = child.stdin.as_mut().unwrap();
-                        // thread::spawn(move || -> io::Result<()> {
-                        //     let mut stdin = io::stdin();
-                        //     let mut buffer = String::new();
-                        //     stdin.read_line(&mut buffer)?;
-                        //     stdin_handle.write_all(buffer.as_bytes())?;
-                        //     Ok(())
-                        // });
-
-                        // match output {
-                        //     Ok(value) => {
-                        //         let stdout = String::from_utf8(value.stdout).unwrap();
-                        //         let stderr = String::from_utf8(value.stderr).unwrap();
-                        //
-                        //         println!("stdout => {}", stdout);
-                        //         println!("stderr => {}", stderr);
-                        //     }
-                        //     Err(e) => {
-                        //         eprintln!("{:?}", e);
-                        //     }
-                        // }
+                        let tempfile = sub_matches.get_one::<String>("tempfile").unwrap();
+                        fs::write(tempfile, cmd).unwrap();
                     }
                     None => {
                         let src_template_dir = config.templates_dir.join(template);
