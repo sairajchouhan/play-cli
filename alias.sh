@@ -22,9 +22,4 @@ play_wrapper () {
   fi
 };
 
-
-alias play='play_wrapper $@'
-
-cargo build -q
-
-play
+alias play='play_wrapper'

@@ -29,7 +29,7 @@ fn main() -> anyhow::Result<()> {
                     Arg::new("tempfile")
                         .long("tempfile")
                         .hide(false)
-                        .required(false)
+                        .required(false),
                 )
                 .arg_required_else_help(true),
         )
@@ -52,6 +52,7 @@ fn main() -> anyhow::Result<()> {
                     .help("open the config file in the default editor"),
             ),
         )
+        .subcommand(Command::new("alias").arg(Arg::new("shell")))
         .get_matches();
 
     match matches.subcommand() {
@@ -121,7 +122,11 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
-            }
+            },
+            "alias" => {
+                let res = fs::read_to_string("alias.sh").unwrap();
+                print!("{res}");
+            },
             _ => {
                 error("Bro what are you doing");
             }
