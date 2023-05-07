@@ -9,7 +9,7 @@ play_wrapper () {
     if /Users/sairaj.chouhan/mine/play-cli/target/debug/play $@ --tempfile $TMPFILE; then
       if [ -e "$TMPFILE" ]; then
         FIXED_CMD=$(cat $TMPFILE);
-        echo "Running $FIXED_CMD...";
+        # echo "Running $FIXED_CMD...";
         eval "$FIXED_CMD"
       else
         echo "Apologies! Extracting command failed"

@@ -53,6 +53,7 @@ fn main() -> anyhow::Result<()> {
             ),
         )
         .subcommand(Command::new("alias").arg(Arg::new("shell")))
+        .subcommand(Command::new("cd"))
         .get_matches();
 
     match matches.subcommand() {
@@ -80,6 +81,13 @@ fn main() -> anyhow::Result<()> {
 
                 match template_hash_map_option {
                     Some(cmd) => {
+                        let final_cmd =
+                            "cd ".to_owned() + target_dir_path.join(&template).to_str().unwrap();
+                        let final_cmd = final_cmd + " && " + cmd;
+                        let final_cmd = final_cmd + " && " + "cd -";
+
+                        let cmd = final_cmd;
+
                         let tempfile = sub_matches.get_one::<String>("tempfile").unwrap();
                         fs::write(tempfile, cmd).unwrap();
                     }
@@ -122,11 +130,11 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
-            },
+            }
             "alias" => {
                 let res = fs::read_to_string("alias.sh").unwrap();
                 print!("{res}");
-            },
+            }
             _ => {
                 error("Bro what are you doing");
             }
