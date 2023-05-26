@@ -5,6 +5,7 @@ use {
     std::{collections::HashMap, env, fs, path::Path, path::PathBuf},
 };
 
+// Test comment
 fn main() -> anyhow::Result<()> {
     let config = Config::setup();
 
